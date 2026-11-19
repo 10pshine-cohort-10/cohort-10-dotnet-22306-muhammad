@@ -57,4 +57,27 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await db.Database.MigrateAsync();
+
+    var seedEmail = builder.Configuration["SeedAdmin:Email"];
+    var seedPassword = builder.Configuration["SeedAdmin:Password"];
+
+    if (!string.IsNullOrWhiteSpace(seedEmail) &&
+        !string.IsNullOrWhiteSpace(seedPassword) &&
+        !await db.Users.AnyAsync(u => u.Role == "Admin"))
+    {
+        db.Users.Add(new User
+        {
+            FullName = "System Administrator",
+            Email = seedEmail,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(seedPassword),
+            Role = "Admin"
+        });
+        await db.SaveChangesAsync();
+    }
+}
+
 app.Run();

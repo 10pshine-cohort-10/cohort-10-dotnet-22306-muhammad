@@ -8,6 +8,24 @@ export interface UserSession {
 const DB_NAME = "TaskManagementAuthDB";
 const STORE_NAME = "session";
 const SESSION_KEY = "current";
+const CHANNEL_NAME = "task_management_auth_sync";
+
+function notifySessionChanged(): void {
+  if (typeof BroadcastChannel !== "undefined") {
+    const channel = new BroadcastChannel(CHANNEL_NAME);
+    channel.postMessage({ type: "SESSION_UPDATED" });
+    channel.close();
+  }
+}
+
+export function subscribeToSessionChanges(onChange: () => void): () => void {
+  if (typeof BroadcastChannel === "undefined") {
+    return () => {};
+  }
+  const channel = new BroadcastChannel(CHANNEL_NAME);
+  channel.onmessage = () => onChange();
+  return () => channel.close();
+}
 
 function openAuthDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -18,13 +36,26 @@ function openAuthDb(): Promise<IDBDatabase> {
       }
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => reject(request.error ?? new Error("Failed to open IndexedDB."));
   });
+}
+
+function isValidUserSession(data: unknown): data is UserSession {
+  return (
+    data !== null &&
+    typeof data === "object" &&
+    "token" in data &&
+    typeof data.token === "string" &&
+    "fullName" in data &&
+    typeof data.fullName === "string" &&
+    "role" in data &&
+    typeof data.role === "string"
+  );
 }
 
 export async function saveSession(session: UserSession): Promise<void> {
   const db = await openAuthDb();
-  return new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     tx.objectStore(STORE_NAME).put(session, SESSION_KEY);
     tx.oncomplete = () => {
@@ -33,9 +64,14 @@ export async function saveSession(session: UserSession): Promise<void> {
     };
     tx.onerror = () => {
       db.close();
-      reject(tx.error);
+      reject(tx.error ?? new Error("IndexedDB write transaction failed."));
+    };
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error ?? new Error("IndexedDB write transaction aborted."));
     };
   });
+  notifySessionChanged();
 }
 
 export async function getValidUserSession(): Promise<UserSession | null> {
@@ -47,24 +83,15 @@ export async function getValidUserSession(): Promise<UserSession | null> {
       req.onsuccess = () => {
         db.close();
         const data: unknown = req.result;
-        if (
-          data !== null &&
-          typeof data === "object" &&
-          "token" in data &&
-          typeof data.token === "string" &&
-          "fullName" in data &&
-          typeof data.fullName === "string" &&
-          "role" in data &&
-          typeof data.role === "string"
-        ) {
-          resolve(data as UserSession);
-        } else {
-          resolve(null);
-        }
+        resolve(isValidUserSession(data) ? data : null);
       };
       req.onerror = () => {
         db.close();
-        reject(req.error);
+        reject(req.error ?? new Error("IndexedDB read request failed."));
+      };
+      tx.onabort = () => {
+        db.close();
+        reject(tx.error ?? new Error("IndexedDB read transaction aborted."));
       };
     });
   } catch {
@@ -77,18 +104,41 @@ export async function getToken(): Promise<string | null> {
   return session ? session.token : null;
 }
 
-export async function clearSession(): Promise<void> {
+export async function clearSession(expectedToken?: string): Promise<void> {
   const db = await openAuthDb();
-  return new Promise((resolve, reject) => {
+  let deleted = false;
+  await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).delete(SESSION_KEY);
+    const store = tx.objectStore(STORE_NAME);
+
+    if (expectedToken === undefined) {
+      store.delete(SESSION_KEY);
+      deleted = true;
+    } else {
+      const getReq = store.get(SESSION_KEY);
+      getReq.onsuccess = () => {
+        const current: unknown = getReq.result;
+        if (isValidUserSession(current) && current.token === expectedToken) {
+          store.delete(SESSION_KEY);
+          deleted = true;
+        }
+      };
+    }
+
     tx.oncomplete = () => {
       db.close();
       resolve();
     };
     tx.onerror = () => {
       db.close();
-      reject(tx.error);
+      reject(tx.error ?? new Error("IndexedDB delete transaction failed."));
+    };
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error ?? new Error("IndexedDB delete transaction aborted."));
     };
   });
+  if (deleted) {
+    notifySessionChanged();
+  }
 }

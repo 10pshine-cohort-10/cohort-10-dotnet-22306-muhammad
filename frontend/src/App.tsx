@@ -1,30 +1,46 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import axios from "axios";
 import AuthPage from "./pages/AuthPage";
 import { checkAdminAccess } from "./api/authApi";
-import { clearSession, getValidUserSession, type UserSession } from "./utils/sessionStorage";
+import {
+  clearSession,
+  getValidUserSession,
+  subscribeToSessionChanges,
+  type UserSession,
+} from "./utils/sessionStorage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
 
   useEffect(() => {
     let active = true;
-    getValidUserSession()
-      .then(async (session) => {
-        if (!active) return;
-        if (!session) {
-          await clearSession();
+    const syncAuth = () => {
+      getValidUserSession()
+        .then(async (session) => {
+          if (!active) return;
+          if (!session) {
+            try {
+              await clearSession();
+            } catch {
+              // Ignore cleanup error when already unauthenticated
+            }
+            if (active) setStatus("unauthenticated");
+          } else {
+            setStatus("authenticated");
+          }
+        })
+        .catch(() => {
           if (active) setStatus("unauthenticated");
-        } else {
-          setStatus("authenticated");
-        }
-      })
-      .catch(() => {
-        if (active) setStatus("unauthenticated");
-      });
+        });
+    };
+
+    syncAuth();
+    const unsubscribe = subscribeToSessionChanges(syncAuth);
+
     return () => {
       active = false;
+      unsubscribe();
     };
   }, []);
 
@@ -38,29 +54,49 @@ function DashboardPlaceholder() {
   const [user, setUser] = useState<UserSession | null>(null);
   const [adminMsg, setAdminMsg] = useState("");
 
-  useEffect(() => {
-    let active = true;
+  const syncSession = useCallback(() => {
+    let cancelled = false;
     getValidUserSession()
       .then(async (session) => {
-        if (!active) return;
+        if (cancelled) return;
         if (!session) {
-          await clearSession();
-          if (active) navigate("/login", { replace: true });
+          setUser(null);
+          try {
+            await clearSession();
+          } catch {
+            // Proceed to login even if persistent cleanup fails
+          }
+          if (!cancelled) navigate("/login", { replace: true });
         } else {
           setUser(session);
         }
       })
       .catch(() => {
-        if (active) navigate("/login", { replace: true });
+        if (!cancelled) {
+          setUser(null);
+          navigate("/login", { replace: true });
+        }
       });
     return () => {
-      active = false;
+      cancelled = true;
     };
   }, [navigate]);
+
+  useEffect(() => {
+    const cancelInitial = syncSession();
+    const unsubscribe = subscribeToSessionChanges(() => {
+      syncSession();
+    });
+    return () => {
+      cancelInitial();
+      unsubscribe();
+    };
+  }, [syncSession]);
 
   if (!user) return null;
 
   const testAdminRoute = async () => {
+    const requestToken = user.token;
     try {
       const res = await checkAdminAccess();
       setAdminMsg(`Success: ${res.data.message}`);
@@ -69,8 +105,18 @@ function DashboardPlaceholder() {
         if (!err.response) {
           setAdminMsg("Connection error: Unable to reach the server. Please retry.");
         } else if (err.response.status === 401) {
-          await clearSession();
-          navigate("/login", { replace: true });
+          try {
+            await clearSession(requestToken);
+          } catch {
+            // Invalidate UI state and redirect even if IndexedDB cleanup fails
+          }
+          const latest = await getValidUserSession();
+          if (!latest || latest.token === requestToken) {
+            setUser(null);
+            navigate("/login", { replace: true });
+          } else {
+            setUser(latest);
+          }
         } else if (err.response.status === 403) {
           setAdminMsg("Access Denied (403 Forbidden): Admin role required.");
         } else {
@@ -83,8 +129,13 @@ function DashboardPlaceholder() {
   };
 
   const handleLogout = async () => {
-    await clearSession();
-    navigate("/login", { replace: true });
+    try {
+      await clearSession();
+      setUser(null);
+      navigate("/login", { replace: true });
+    } catch {
+      setAdminMsg("Logout failed: Unable to clear local session. Please try again.");
+    }
   };
 
   return (
