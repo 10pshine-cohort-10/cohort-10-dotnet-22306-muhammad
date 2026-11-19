@@ -82,18 +82,11 @@ function DashboardPlaceholder() {
     (isMounted: () => boolean) => {
       const currentGen = ++syncGenRef.current;
       getValidUserSession()
-        .then(async (session) => {
+        .then((session) => {
           if (!isMounted() || currentGen !== syncGenRef.current) return;
           if (!session) {
             setUser(null);
-            try {
-              await clearSession();
-            } catch {
-              // Proceed to login even if persistent cleanup fails
-            }
-            if (isMounted() && currentGen === syncGenRef.current) {
-              navigate("/login", { replace: true });
-            }
+            navigate("/login", { replace: true });
           } else {
             setLookupError(false);
             setUser(session);
