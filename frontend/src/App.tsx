@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import axios from "axios";
 import AuthPage from "./pages/AuthPage";
@@ -11,27 +11,34 @@ import {
 } from "./utils/sessionStorage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const [status, setStatus] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
+  const [status, setStatus] = useState<"checking" | "authenticated" | "unauthenticated" | "error">("checking");
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
+    let generation = 0;
+
     const syncAuth = () => {
+      const currentGen = ++generation;
       getValidUserSession()
         .then(async (session) => {
-          if (!active) return;
+          if (!active || currentGen !== generation) return;
           if (!session) {
             try {
               await clearSession();
             } catch {
-              // Ignore cleanup error when already unauthenticated
+              // Ignore cleanup error when session is confirmed missing
             }
-            if (active) setStatus("unauthenticated");
+            if (active && currentGen === generation) {
+              setStatus("unauthenticated");
+            }
           } else {
             setStatus("authenticated");
           }
         })
         .catch(() => {
-          if (active) setStatus("unauthenticated");
+          if (!active || currentGen !== generation) return;
+          setStatus((prev) => (prev === "authenticated" ? "authenticated" : "error"));
         });
     };
 
@@ -42,9 +49,24 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       active = false;
       unsubscribe();
     };
-  }, []);
+  }, [attempt]);
 
   if (status === "checking") return <p style={{ padding: 24 }}>Loading session...</p>;
+  if (status === "error") {
+    return (
+      <div style={{ padding: 24, fontFamily: "sans-serif" }}>
+        <p>Unable to verify your session due to a local storage error.</p>
+        <button
+          onClick={() => {
+            setStatus("checking");
+            setAttempt((n) => n + 1);
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
   if (status === "unauthenticated") return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
@@ -52,46 +74,66 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function DashboardPlaceholder() {
   const navigate = useNavigate();
   const [user, setUser] = useState<UserSession | null>(null);
+  const [lookupError, setLookupError] = useState(false);
   const [adminMsg, setAdminMsg] = useState("");
+  const syncGenRef = useRef(0);
 
-  const syncSession = useCallback(() => {
-    let cancelled = false;
-    getValidUserSession()
-      .then(async (session) => {
-        if (cancelled) return;
-        if (!session) {
-          setUser(null);
-          try {
-            await clearSession();
-          } catch {
-            // Proceed to login even if persistent cleanup fails
+  const syncSession = useCallback(
+    (isMounted: () => boolean) => {
+      const currentGen = ++syncGenRef.current;
+      getValidUserSession()
+        .then(async (session) => {
+          if (!isMounted() || currentGen !== syncGenRef.current) return;
+          if (!session) {
+            setUser(null);
+            try {
+              await clearSession();
+            } catch {
+              // Proceed to login even if persistent cleanup fails
+            }
+            if (isMounted() && currentGen === syncGenRef.current) {
+              navigate("/login", { replace: true });
+            }
+          } else {
+            setLookupError(false);
+            setUser(session);
           }
-          if (!cancelled) navigate("/login", { replace: true });
-        } else {
-          setUser(session);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setUser(null);
-          navigate("/login", { replace: true });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [navigate]);
+        })
+        .catch(() => {
+          if (!isMounted() || currentGen !== syncGenRef.current) return;
+          setUser((prev) => {
+            if (!prev) setLookupError(true);
+            return prev;
+          });
+        });
+    },
+    [navigate]
+  );
 
   useEffect(() => {
-    const cancelInitial = syncSession();
+    let active = true;
+    const isMounted = () => active;
+
+    syncSession(isMounted);
     const unsubscribe = subscribeToSessionChanges(() => {
-      syncSession();
+      syncSession(isMounted);
     });
+
     return () => {
-      cancelInitial();
+      active = false;
+      syncGenRef.current += 1;
       unsubscribe();
     };
   }, [syncSession]);
+
+  if (lookupError && !user) {
+    return (
+      <div style={{ padding: 24, fontFamily: "sans-serif" }}>
+        <p>Unable to load your session due to a local storage error.</p>
+        <button onClick={() => syncSession(() => true)}>Retry</button>
+      </div>
+    );
+  }
 
   if (!user) return null;
 
@@ -110,12 +152,17 @@ function DashboardPlaceholder() {
           } catch {
             // Invalidate UI state and redirect even if IndexedDB cleanup fails
           }
-          const latest = await getValidUserSession();
-          if (!latest || latest.token === requestToken) {
+          try {
+            const latest = await getValidUserSession();
+            if (!latest || latest.token === requestToken) {
+              setUser(null);
+              navigate("/login", { replace: true });
+            } else {
+              setUser(latest);
+            }
+          } catch {
             setUser(null);
             navigate("/login", { replace: true });
-          } else {
-            setUser(latest);
           }
         } else if (err.response.status === 403) {
           setAdminMsg("Access Denied (403 Forbidden): Admin role required.");

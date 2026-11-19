@@ -69,14 +69,26 @@ using (var scope = app.Services.CreateScope())
         !string.IsNullOrWhiteSpace(seedPassword) &&
         !await db.Users.AnyAsync(u => u.Role == "Admin"))
     {
-        db.Users.Add(new User
+        var existingUser = await db.Users.FirstOrDefaultAsync(u => u.Email == seedEmail);
+        if (existingUser is not null)
         {
-            FullName = "System Administrator",
-            Email = seedEmail,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(seedPassword),
-            Role = "Admin"
-        });
-        await db.SaveChangesAsync();
+            app.Logger.LogWarning(
+                "Initial Admin seeding skipped: configured SeedAdmin:Email '{SeedEmail}' already belongs to an existing account (Role: {Role}). " +
+                "Configure an unused SeedAdmin:Email via User Secrets or environment variables and restart the API to provision the first Admin.",
+                seedEmail,
+                existingUser.Role);
+        }
+        else
+        {
+            db.Users.Add(new User
+            {
+                FullName = "System Administrator",
+                Email = seedEmail,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(seedPassword),
+                Role = "Admin"
+            });
+            await db.SaveChangesAsync();
+        }
     }
 }
 

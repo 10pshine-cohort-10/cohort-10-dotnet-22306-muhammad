@@ -75,35 +75,34 @@ export async function saveSession(session: UserSession): Promise<void> {
 }
 
 export async function getValidUserSession(): Promise<UserSession | null> {
+  const db = await openAuthDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const req = tx.objectStore(STORE_NAME).get(SESSION_KEY);
+    req.onsuccess = () => {
+      db.close();
+      const data: unknown = req.result;
+      resolve(isValidUserSession(data) ? data : null);
+    };
+    req.onerror = () => {
+      db.close();
+      reject(req.error ?? new Error("IndexedDB read request failed."));
+    };
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error ?? new Error("IndexedDB read transaction aborted."));
+    };
+  });
+}
+
+export async function getToken(): Promise<string | null> {
   try {
-    const db = await openAuthDb();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readonly");
-      const req = tx.objectStore(STORE_NAME).get(SESSION_KEY);
-      req.onsuccess = () => {
-        db.close();
-        const data: unknown = req.result;
-        resolve(isValidUserSession(data) ? data : null);
-      };
-      req.onerror = () => {
-        db.close();
-        reject(req.error ?? new Error("IndexedDB read request failed."));
-      };
-      tx.onabort = () => {
-        db.close();
-        reject(tx.error ?? new Error("IndexedDB read transaction aborted."));
-      };
-    });
+    const session = await getValidUserSession();
+    return session ? session.token : null;
   } catch {
     return null;
   }
 }
-
-export async function getToken(): Promise<string | null> {
-  const session = await getValidUserSession();
-  return session ? session.token : null;
-}
-
 export async function clearSession(expectedToken?: string): Promise<void> {
   const db = await openAuthDb();
   let deleted = false;
