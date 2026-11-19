@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using TaskManagement.API.Data;
@@ -16,12 +17,12 @@ namespace TaskManagement.API.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private readonly IConfiguration _config;
+    private readonly JwtSettings _jwtSettings;
 
-    public AuthController(AppDbContext db, IConfiguration config)
+    public AuthController(AppDbContext db, JwtSettings jwtSettings)
     {
         _db = db;
-        _config = config;
+        _jwtSettings = jwtSettings;
     }
 
     [HttpPost("register")]
@@ -30,21 +31,42 @@ public class AuthController : ControllerBase
         if (await _db.Users.AnyAsync(u => u.Email == req.Email))
             return Conflict(new { message = "Email already registered." });
 
-        var role = req.Role == "Admin" ? "Admin" : "RegularUser";
-
+        // Always assign RegularUser on public self-registration
         var user = new User
         {
             FullName = req.FullName,
             Email = req.Email,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.Password),
-            Role = role
+            Role = "RegularUser"
         };
 
         _db.Users.Add(user);
-        await _db.SaveChangesAsync();
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is SqlException { Number: 2601 or 2627 })
+        {
+            return Conflict(new { message = "Email already registered." });
+        }
 
         var token = GenerateJwt(user);
         return Ok(new AuthResponse(token, user.FullName, user.Email, user.Role));
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPatch("users/{userId:int}/promote")]
+    public async Task<IActionResult> PromoteToAdmin(int userId)
+    {
+        var user = await _db.Users.FindAsync(userId);
+        if (user is null)
+            return NotFound(new { message = "User not found." });
+
+        user.Role = "Admin";
+        await _db.SaveChangesAsync();
+
+        return Ok(new { message = $"{user.Email} promoted to Admin." });
     }
 
     [HttpPost("login")]
@@ -64,8 +86,7 @@ public class AuthController : ControllerBase
 
     private string GenerateJwt(User user)
     {
-        var jwtKey = _config["Jwt:Key"] ?? throw new InvalidOperationException("JWT signing key is missing.");
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Key));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var claims = new[]
@@ -77,8 +98,8 @@ public class AuthController : ControllerBase
         };
 
         var token = new JwtSecurityToken(
-            issuer: _config["Jwt:Issuer"],
-            audience: _config["Jwt:Audience"],
+            issuer: _jwtSettings.Issuer,
+            audience: _jwtSettings.Audience,
             claims: claims,
             expires: DateTime.UtcNow.AddHours(4),
             signingCredentials: creds

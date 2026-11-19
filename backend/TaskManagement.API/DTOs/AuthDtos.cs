@@ -5,8 +5,7 @@ namespace TaskManagement.API.DTOs;
 public record RegisterRequest(
     [Required] string FullName,
     [Required, EmailAddress] string Email,
-    [Required, MinLength(6)] string Password,
-    string? Role
+    [Required, MinLength(6)] string Password
 );
 
 public record LoginRequest(

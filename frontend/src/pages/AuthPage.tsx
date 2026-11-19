@@ -2,27 +2,27 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { loginUser, registerUser } from "../api/authApi";
+import { saveSession } from "../utils/sessionStorage";
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("RegularUser");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-    const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {    e.preventDefault();
+  const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
+    e.preventDefault();
     setError("");
     setLoading(true);
     try {
       const res = isLogin
         ? await loginUser({ email, password })
-        : await registerUser({ fullName, email, password, role });
+        : await registerUser({ fullName, email, password });
 
-      localStorage.setItem("token", res.data.token);
-      localStorage.setItem("user", JSON.stringify(res.data));
+      await saveSession(res.data);
       navigate("/dashboard");
     } catch (err: unknown) {
       if (axios.isAxiosError(err)) {
@@ -41,18 +41,12 @@ export default function AuthPage() {
       {error && <p style={{ color: "red" }}>{error}</p>}
       <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {!isLogin && (
-          <>
-            <input
-              placeholder="Full Name"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              required
-            />
-            <select value={role} onChange={(e) => setRole(e.target.value)}>
-              <option value="RegularUser">Regular User</option>
-              <option value="Admin">Admin</option>
-            </select>
-          </>
+          <input
+            placeholder="Full Name"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            required
+          />
         )}
         <input
           type="email"

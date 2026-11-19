@@ -1,11 +1,12 @@
 import axios from "axios";
+import { getToken } from "../utils/sessionStorage";
 
 const api = axios.create({
   baseURL: "http://localhost:5176/api", 
 });
 
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
+api.interceptors.request.use(async (config) => {
+  const token = await getToken(); 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -16,7 +17,6 @@ export interface RegisterPayload {
   fullName: string;
   email: string;
   password: string;
-  role: string;
 }
 
 export interface LoginPayload {
