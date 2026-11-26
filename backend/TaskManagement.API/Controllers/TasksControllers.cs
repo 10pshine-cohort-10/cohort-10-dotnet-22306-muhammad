@@ -207,6 +207,35 @@ public class TasksController : ControllerBase
         return Ok(users);
     }
 
+    // PATCH /api/tasks/5/status
+[HttpPatch("{id:int}/status")]
+public async Task<ActionResult<TaskResponse>> UpdateTaskStatus(int id, UpdateTaskStatusRequest req)
+{
+    var currentUserId = GetCurrentUserId();
+
+    var task = await _db.Tasks
+        .Include(t => t.CreatedByUser)
+        .Include(t => t.AssignedToUser)
+        .FirstOrDefaultAsync(t => t.Id == id)
+        ?? throw new KeyNotFoundException($"Task with ID {id} was not found.");
+
+    if (!IsAdmin() && task.CreatedByUserId != currentUserId && task.AssignedToUserId != currentUserId)
+        return Forbid();
+
+    task.Status = req.Status;
+    task.UpdatedAt = DateTime.UtcNow;
+
+    await _db.SaveChangesAsync();
+
+    _logger.LogInformation(
+        "Task {TaskId} status updated to {Status} by UserId {UserId}",
+        task.Id,
+        task.Status,
+        currentUserId);
+
+    return Ok(MapToResponse(task));
+}
+
     private static TaskResponse MapToResponse(TaskItem t) => new(
         t.Id,
         t.Title,

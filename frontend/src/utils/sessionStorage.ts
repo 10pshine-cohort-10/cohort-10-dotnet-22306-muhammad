@@ -96,16 +96,13 @@ export async function getValidUserSession(): Promise<UserSession | null> {
 }
 
 export async function getToken(): Promise<string | null> {
-  try {
     const session = await getValidUserSession();
     return session ? session.token : null;
-  } catch {
-    return null;
-  }
 }
-export async function clearSession(expectedToken?: string): Promise<void> {
+export async function clearSession(expectedToken?: string): Promise<boolean> {
   const db = await openAuthDb();
   let deleted = false;
+  
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
@@ -116,11 +113,14 @@ export async function clearSession(expectedToken?: string): Promise<void> {
     } else {
       const getReq = store.get(SESSION_KEY);
       getReq.onsuccess = () => {
-        const current: unknown = getReq.result;
-        if (isValidUserSession(current) && current.token === expectedToken) {
+        const stored: unknown = getReq.result;
+        if (isValidUserSession(stored) && stored.token === expectedToken) {
           store.delete(SESSION_KEY);
           deleted = true;
         }
+      };
+      getReq.onerror = () => {
+        reject(getReq.error ?? new Error("IndexedDB read before delete failed."));
       };
     }
 
@@ -140,4 +140,5 @@ export async function clearSession(expectedToken?: string): Promise<void> {
   if (deleted) {
     notifySessionChanged();
   }
+  return deleted;
 }

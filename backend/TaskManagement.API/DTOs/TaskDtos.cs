@@ -6,7 +6,7 @@ namespace TaskManagement.API.DTOs;
 public record CreateTaskRequest(
     [Required, MaxLength(150)] string Title,
     [MaxLength(1000)] string? Description,
-    TaskPriority Priority,
+    [EnumDataType(typeof(TaskPriority))] TaskPriority Priority,
     [Required, MaxLength(50)] string Category,
     DateTime? DueDate,
     int? AssignedToUserId
@@ -15,13 +15,16 @@ public record CreateTaskRequest(
 public record UpdateTaskRequest(
     [Required, MaxLength(150)] string Title,
     [MaxLength(1000)] string? Description,
-    TaskPriority Priority,
-    TaskItemStatus Status,
+    [EnumDataType(typeof(TaskPriority))] TaskPriority Priority,
+    [EnumDataType(typeof(TaskItemStatus))] TaskItemStatus Status,
     [Required, MaxLength(50)] string Category,
     DateTime? DueDate,
     int? AssignedToUserId
 );
 
+public record UpdateTaskStatusRequest(
+    [EnumDataType(typeof(TaskItemStatus))] TaskItemStatus Status
+);
 public record TaskResponse(
     int Id,
     string Title,

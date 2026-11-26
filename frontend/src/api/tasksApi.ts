@@ -58,6 +58,9 @@ export const createTask = (data: CreateTaskPayload) =>
 export const updateTask = (id: number, data: UpdateTaskPayload) =>
   api.put<TaskItem>(`/tasks/${id}`, data);
 
+export const updateTaskStatus = (id: number, status: TaskItemStatus) =>
+  api.patch<TaskItem>(`/tasks/${id}/status`, { status });
+
 export const deleteTask = (id: number) =>
   api.delete(`/tasks/${id}`);
 

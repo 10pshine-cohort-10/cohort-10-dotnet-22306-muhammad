@@ -3,7 +3,6 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import AuthPage from "./pages/AuthPage";
 import TasksDashboard from "./pages/TasksDashboard";
 import {
-  clearSession,
   getValidUserSession,
   subscribeToSessionChanges,
 } from "./utils/sessionStorage";
@@ -19,20 +18,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     const syncAuth = () => {
       const currentGen = ++generation;
       getValidUserSession()
-        .then(async (session) => {
+        .then((session) => {
           if (!active || currentGen !== generation) return;
-          if (!session) {
-            try {
-              await clearSession();
-            } catch {
-              // Ignore cleanup error when session is confirmed missing
-            }
-            if (active && currentGen === generation) {
-              setStatus("unauthenticated");
-            }
-          } else {
-            setStatus("authenticated");
-          }
+          setStatus(session ? "authenticated" : "unauthenticated");
         })
         .catch(() => {
           if (!active || currentGen !== generation) return;

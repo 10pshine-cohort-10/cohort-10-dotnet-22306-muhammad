@@ -96,6 +96,12 @@ try
                     seedEmail,
                     existingUser.Role);
             }
+            else if (Encoding.UTF8.GetByteCount(seedPassword) > 72)
+            {
+                Log.Error(
+                    "Initial Admin seeding skipped: configured SeedAdmin:Password exceeds BCrypt's 72-byte UTF-8 limit. " +
+                    "Configure a shorter SeedAdmin:Password via User Secrets or environment variables and restart the API.");
+            }
             else
             {
                 db.Users.Add(new User
@@ -116,6 +122,7 @@ try
 catch (Exception ex)
 {
     Log.Fatal(ex, "TaskManagement.API terminated unexpectedly");
+    throw;
 }
 finally
 {

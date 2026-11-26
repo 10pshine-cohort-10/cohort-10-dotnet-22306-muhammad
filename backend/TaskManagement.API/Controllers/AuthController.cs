@@ -26,10 +26,18 @@ public class AuthController : ControllerBase
         _jwtSettings = jwtSettings;
         _logger = logger;
     }
+    private static bool ExceedsBcryptMaxBytes(string password) =>
+        Encoding.UTF8.GetByteCount(password) > 72;
 
     [HttpPost("register")]
     public async Task<IActionResult> Register(RegisterRequest req)
     {
+        if (ExceedsBcryptMaxBytes(req.Password))
+        {
+            _logger.LogWarning("Registration rejected: password exceeds 72 UTF-8 bytes for {Email}", req.Email);
+            return BadRequest(new { message = "Password must not exceed 72 bytes in UTF-8 encoding." });
+        }
+
         if (await _db.Users.AnyAsync(u => u.Email == req.Email))
         {
             _logger.LogWarning("Registration rejected: email {Email} is already registered", req.Email);
@@ -86,6 +94,12 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginRequest req)
     {
+        if (ExceedsBcryptMaxBytes(req.Password))
+        {
+            _logger.LogWarning("Failed login attempt: password exceeds 72 UTF-8 bytes for {Email}", req.Email);
+            return Unauthorized(new { message = "Invalid email or password." });
+        }
+        
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == req.Email);
         if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
         {

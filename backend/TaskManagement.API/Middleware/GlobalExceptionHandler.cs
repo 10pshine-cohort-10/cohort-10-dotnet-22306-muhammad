@@ -37,7 +37,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
                 StatusCodes.Status404NotFound,
                 "Resource Not Found",
                 exception.Message),
-            ArgumentException or InvalidOperationException => (
+            ArgumentException => (
                 StatusCodes.Status400BadRequest,
                 "Bad Request",
                 exception.Message),

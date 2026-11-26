@@ -8,6 +8,7 @@ import {
   getAssignees,
   getTasks,
   updateTask,
+  updateTaskStatus,
   type AssigneeOption,
   type TaskItem,
   type TaskItemStatus,
@@ -45,13 +46,30 @@ function extractApiError(err: unknown): string {
   return "An unexpected error occurred.";
 }
 
+function getTodayDateKey(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function toCalendarDateKey(isoOrDate: string): string {
+  return isoOrDate.slice(0, 10);
+}
+
+function formatCalendarDate(isoOrDate: string): string {
+  const [y, m, d] = toCalendarDateKey(isoOrDate).split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString();
+}
+
 export default function TasksDashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState<UserSession | null>(null);
   const [lookupError, setLookupError] = useState(false);
   const [banner, setBanner] = useState<{ type: "error" | "info"; text: string } | null>(null);
   const syncGenRef = useRef(0);
-
+  const loadGenerationRef = useRef(0);
   // Task state
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [assignees, setAssignees] = useState<AssigneeOption[]>([]);
@@ -74,11 +92,12 @@ export default function TasksDashboard() {
   const [assignedToUserId, setAssignedToUserId] = useState<number | "">("");
 
   const handleUnauthorized = useCallback(
-    async (requestToken?: string) => {
+    async (expiredToken?: string) => {
       try {
-        await clearSession(requestToken);
-      } catch {
-        // Ignore storage errors on forced sign-out
+        const cleared = await clearSession(expiredToken);
+        if(!cleared) return;
+    } catch {
+        // Proceed with local signout even if IndexedDB cleanup fails
       }
       setUser(null);
       navigate("/login", { replace: true });
@@ -129,6 +148,7 @@ export default function TasksDashboard() {
 
   const loadTasksAndAssignees = useCallback(async () => {
     if (!user) return;
+    const generation = ++loadGenerationRef.current;
     setLoadingTasks(true);
     try {
       const [tasksRes, assigneesRes] = await Promise.all([
@@ -139,9 +159,14 @@ export default function TasksDashboard() {
         }),
         getAssignees(),
       ]);
+
+    if (generation !== loadGenerationRef.current) return;
+
       setTasks(tasksRes.data);
       setAssignees(assigneesRes.data);
     } catch (err) {
+      if (generation !== loadGenerationRef.current) return;
+
       if (axios.isAxiosError(err) && err.response?.status === 401) {
         await handleUnauthorized(user.token);
         return;
@@ -154,7 +179,10 @@ export default function TasksDashboard() {
 
   useEffect(() => {
     loadTasksAndAssignees();
-  }, [loadTasksAndAssignees]);
+    return () => {
+        loadGenerationRef.current += 1;
+    }; 
+}, [loadTasksAndAssignees]);
 
   const resetForm = () => {
     setEditingTaskId(null);
@@ -191,7 +219,7 @@ export default function TasksDashboard() {
       description: description.trim() || undefined,
       priority,
       category: category.trim(),
-      dueDate: dueDate ? new Date(dueDate).toISOString() : null,
+      dueDate: dueDate ? `${dueDate}T00:00:00Z` : null,
       assignedToUserId: assignedToUserId === "" ? null : Number(assignedToUserId),
     };
 
@@ -220,15 +248,7 @@ export default function TasksDashboard() {
     if (!user) return;
     setBanner(null);
     try {
-      await updateTask(task.id, {
-        title: task.title,
-        description: task.description ?? undefined,
-        priority: task.priority,
-        status: nextStatus,
-        category: task.category,
-        dueDate: task.dueDate ?? null,
-        assignedToUserId: task.assignedToUserId ?? null,
-      });
+      await updateTaskStatus(task.id, nextStatus);
       await loadTasksAndAssignees();
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.status === 401) {
@@ -515,7 +535,9 @@ export default function TasksDashboard() {
             const pStyle = PRIORITY_LABELS[task.priority];
             const sStyle = STATUS_LABELS[task.status];
             const isOverdue =
-              task.dueDate && task.status !== 3 && new Date(task.dueDate) < new Date(new Date().toDateString());
+              Boolean(task.dueDate) &&
+              task.status !== 3 &&
+              toCalendarDateKey(task.dueDate!) < getTodayDateKey();
 
             return (
               <div
@@ -561,7 +583,7 @@ export default function TasksDashboard() {
                     </span>
                     {task.dueDate && (
                       <span style={{ color: isOverdue ? "#dc2626" : "#6b7280", fontWeight: isOverdue ? 600 : 400 }}>
-                        <strong>Due:</strong> {new Date(task.dueDate).toLocaleDateString()}
+                        <strong>Due:</strong> {formatCalendarDate(task.dueDate)}
                         {isOverdue ? " (Overdue)" : ""}
                       </span>
                     )}
