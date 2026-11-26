@@ -1,8 +1,8 @@
 import axios from "axios";
 import { getToken } from "../utils/sessionStorage";
 
-const api = axios.create({
-  baseURL: "http://localhost:5176/api", 
+export const api = axios.create({
+  baseURL: "http://localhost:5176/api",
 });
 
 api.interceptors.request.use(async (config) => {

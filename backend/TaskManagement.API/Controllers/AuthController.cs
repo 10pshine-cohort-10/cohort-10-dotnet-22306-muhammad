@@ -18,18 +18,23 @@ public class AuthController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly JwtSettings _jwtSettings;
+    private readonly ILogger<AuthController> _logger;
 
-    public AuthController(AppDbContext db, JwtSettings jwtSettings)
+    public AuthController(AppDbContext db, JwtSettings jwtSettings, ILogger<AuthController> logger)
     {
         _db = db;
         _jwtSettings = jwtSettings;
+        _logger = logger;
     }
 
     [HttpPost("register")]
     public async Task<IActionResult> Register(RegisterRequest req)
     {
         if (await _db.Users.AnyAsync(u => u.Email == req.Email))
+        {
+            _logger.LogWarning("Registration rejected: email {Email} is already registered", req.Email);
             return Conflict(new { message = "Email already registered." });
+        }
 
         // Always assign RegularUser on public self-registration
         var user = new User
@@ -48,8 +53,11 @@ public class AuthController : ControllerBase
         }
         catch (DbUpdateException ex) when (ex.InnerException is SqlException { Number: 2601 or 2627 })
         {
+            _logger.LogWarning(ex, "Registration race condition: duplicate email {Email}", req.Email);
             return Conflict(new { message = "Email already registered." });
         }
+
+        _logger.LogInformation("New user registered: {Email} (UserId: {UserId}, Role: {Role})", user.Email, user.Id, user.Role);
 
         var token = GenerateJwt(user);
         return Ok(new AuthResponse(token, user.FullName, user.Email, user.Role));
@@ -61,10 +69,16 @@ public class AuthController : ControllerBase
     {
         var user = await _db.Users.FindAsync(userId);
         if (user is null)
+        {
+            _logger.LogWarning("Admin promotion failed: target UserId {UserId} not found", userId);
             return NotFound(new { message = "User not found." });
+        }
 
         user.Role = "Admin";
         await _db.SaveChangesAsync();
+
+        var adminEmail = User.FindFirstValue(JwtRegisteredClaimNames.Email) ?? User.Identity?.Name ?? "UnknownAdmin";
+        _logger.LogInformation("User {TargetEmail} (UserId: {UserId}) promoted to Admin by {AdminEmail}", user.Email, user.Id, adminEmail);
 
         return Ok(new { message = $"{user.Email} promoted to Admin." });
     }
@@ -74,7 +88,12 @@ public class AuthController : ControllerBase
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == req.Email);
         if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
+        {
+            _logger.LogWarning("Failed login attempt for email {Email}", req.Email);
             return Unauthorized(new { message = "Invalid email or password." });
+        }
+
+        _logger.LogInformation("User {Email} (UserId: {UserId}, Role: {Role}) logged in successfully", user.Email, user.Id, user.Role);
 
         var token = GenerateJwt(user);
         return Ok(new AuthResponse(token, user.FullName, user.Email, user.Role));

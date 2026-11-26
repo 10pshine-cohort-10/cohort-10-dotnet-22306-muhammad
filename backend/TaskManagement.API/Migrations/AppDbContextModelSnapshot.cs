@@ -16,7 +16,7 @@ partial class AppDbContextModelSnapshot : ModelSnapshot
     // If you encounter a merge conflict in the line below, it means you need to
     // discard one of the migration branches and recreate its migrations on top of
     // the other branch. See https://aka.ms/efcore-docs-migrations-conflicts for more info.
-    public override string LastMigrationId => "20261119133944_InitialAuth";
+    public override string LastMigrationId => "20261126115429_AddTaskManagementSchema";
 
     protected override void BuildModel(ModelBuilder modelBuilder)
     {
@@ -26,6 +26,62 @@ partial class AppDbContextModelSnapshot : ModelSnapshot
             .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
         SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
+
+        modelBuilder.Entity("TaskManagement.API.Models.TaskItem", b =>
+            {
+                var id = b.Property<int>("Id")
+                    .ValueGeneratedOnAdd()
+                    .HasColumnType("int");
+
+                SqlServerPropertyBuilderExtensions.UseIdentityColumn(id);
+
+                b.Property<int?>("AssignedToUserId")
+                    .HasColumnType("int");
+
+                b.Property<string>("Category")
+                    .IsRequired()
+                    .HasMaxLength(50)
+                    .HasColumnType("nvarchar(50)");
+
+                b.Property<DateTime>("CreatedAt")
+                    .HasColumnType("datetime2");
+
+                b.Property<int>("CreatedByUserId")
+                    .HasColumnType("int");
+
+                b.Property<string>("Description")
+                    .HasMaxLength(1000)
+                    .HasColumnType("nvarchar(1000)");
+
+                b.Property<DateTime?>("DueDate")
+                    .HasColumnType("datetime2");
+
+                b.Property<int>("Priority")
+                    .HasColumnType("int");
+
+                b.Property<int>("Status")
+                    .HasColumnType("int");
+
+                b.Property<string>("Title")
+                    .IsRequired()
+                    .HasMaxLength(150)
+                    .HasColumnType("nvarchar(150)");
+
+                b.Property<DateTime?>("UpdatedAt")
+                    .HasColumnType("datetime2");
+
+                b.HasKey("Id");
+
+                b.HasIndex("AssignedToUserId");
+
+                b.HasIndex("CreatedByUserId");
+
+                b.HasIndex("DueDate");
+
+                b.HasIndex("Status");
+
+                b.ToTable("Tasks");
+            });
 
         modelBuilder.Entity("TaskManagement.API.Models.User", b =>
             {
@@ -60,6 +116,24 @@ partial class AppDbContextModelSnapshot : ModelSnapshot
                     .IsUnique();
 
                 b.ToTable("Users");
+            });
+
+        modelBuilder.Entity("TaskManagement.API.Models.TaskItem", b =>
+            {
+                b.HasOne("TaskManagement.API.Models.User", "AssignedToUser")
+                    .WithMany()
+                    .HasForeignKey("AssignedToUserId")
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                b.HasOne("TaskManagement.API.Models.User", "CreatedByUser")
+                    .WithMany()
+                    .HasForeignKey("CreatedByUserId")
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired();
+
+                b.Navigation("AssignedToUser");
+
+                b.Navigation("CreatedByUser");
             });
 #pragma warning restore 612, 618
     }
