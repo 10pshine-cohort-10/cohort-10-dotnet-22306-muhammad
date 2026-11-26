@@ -99,25 +99,32 @@ export async function getToken(): Promise<string | null> {
     const session = await getValidUserSession();
     return session ? session.token : null;
 }
-export async function clearSession(expectedToken?: string): Promise<boolean> {
+
+export type ClearSessionResult = "cleared" | "absent" | "different";
+
+export async function clearSession(expectedToken?: string): Promise<ClearSessionResult> {
   const db = await openAuthDb();
-  let deleted = false;
   
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
+    const result = await new Promise<ClearSessionResult>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      let txResult: ClearSessionResult = "absent";
 
     if (expectedToken === undefined) {
       store.delete(SESSION_KEY);
-      deleted = true;
+      txResult = "cleared";
     } else {
       const getReq = store.get(SESSION_KEY);
       getReq.onsuccess = () => {
         const stored: unknown = getReq.result;
-        if (isValidUserSession(stored) && stored.token === expectedToken) {
+        if (!isValidUserSession(stored)){
+          txResult = "absent";
+        } else if (stored.token === expectedToken) {
           store.delete(SESSION_KEY);
-          deleted = true;
-        }
+          txResult = "cleared";
+        } else {
+          txResult = "different";
+      }
       };
       getReq.onerror = () => {
         reject(getReq.error ?? new Error("IndexedDB read before delete failed."));
@@ -126,7 +133,7 @@ export async function clearSession(expectedToken?: string): Promise<boolean> {
 
     tx.oncomplete = () => {
       db.close();
-      resolve();
+      resolve(txResult);
     };
     tx.onerror = () => {
       db.close();
@@ -137,8 +144,9 @@ export async function clearSession(expectedToken?: string): Promise<boolean> {
       reject(tx.error ?? new Error("IndexedDB delete transaction aborted."));
     };
   });
-  if (deleted) {
+
+  if (result === "cleared") {
     notifySessionChanged();
   }
-  return deleted;
+  return result;
 }

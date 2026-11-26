@@ -80,6 +80,16 @@ export default function TasksDashboard() {
   const [filterStatus, setFilterStatus] = useState<TaskItemStatus | "">("");
   const [filterPriority, setFilterPriority] = useState<TaskPriority | "">("");
   const [filterCategory, setFilterCategory] = useState("");
+  const filtersRef = useRef({
+    status: filterStatus,
+    priority: filterPriority,
+    category: filterCategory,
+  });
+  filtersRef.current = {
+    status: filterStatus,
+    priority: filterPriority,
+    category: filterCategory,
+  };
 
   // Form state (supports both Create & Edit)
   const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
@@ -94,8 +104,8 @@ export default function TasksDashboard() {
   const handleUnauthorized = useCallback(
     async (expiredToken?: string) => {
       try {
-        const cleared = await clearSession(expiredToken);
-        if(!cleared) return;
+        const result = await clearSession(expiredToken);
+        if(result === "different") return;
     } catch {
         // Proceed with local signout even if IndexedDB cleanup fails
       }
@@ -149,13 +159,14 @@ export default function TasksDashboard() {
   const loadTasksAndAssignees = useCallback(async () => {
     if (!user) return;
     const generation = ++loadGenerationRef.current;
+    const { status: currentStatus, priority: currentPriority, category: currentCategory } = filtersRef.current;
     setLoadingTasks(true);
     try {
       const [tasksRes, assigneesRes] = await Promise.all([
         getTasks({
-          status: filterStatus,
-          priority: filterPriority,
-          category: filterCategory,
+          status: currentStatus,
+          priority: currentPriority,
+          category: currentCategory,
         }),
         getAssignees(),
       ]);
@@ -173,8 +184,9 @@ export default function TasksDashboard() {
       }
       setBanner({ type: "error", text: extractApiError(err) });
     } finally {
+    if (generation === loadGenerationRef.current) {
       setLoadingTasks(false);
-    }
+    }}
   }, [user, filterStatus, filterPriority, filterCategory, handleUnauthorized]);
 
   useEffect(() => {
